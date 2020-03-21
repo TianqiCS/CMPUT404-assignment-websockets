@@ -20,22 +20,20 @@
         See the License for the specific language governing permissions and
         limitations under the License.
     "/>
-    <script src="json2.js"></script>
+<!--    <script src="json2.js"></script>-->
   </head> 
   <body bgcolor="white" height="100%" width="100%"> 
     <div id="debug"></div>
     <canvas id="c" width="100%" height="100%" style="-webkit-tap-highlight-color: transparent;"></canvas> 
 
     <script>
-      // Fix me
-var canvas = document.getElementById('c');
-var host = window.location.host;
-var context = canvas.getContext("2d");
-var W = canvas.width  = window.innerWidth-6;
-var H = canvas.height = window.innerHeight-50;
-var wscounter = 0;
-var socket;
-
+const canvas = document.getElementById('c');
+const host = window.location.host;
+const context = canvas.getContext("2d");
+const W = canvas.width  = window.innerWidth-6;
+const H = canvas.height = window.innerHeight-50;
+const wscounter = 0;
+let socket;
 function debug(str) {
     var debugDiv = document.getElementById('debug');
     debugDiv.innerHTML = "" + str;
@@ -46,17 +44,18 @@ world = {};
 
 //XXX: TODO Make this prettier!
 function drawCircle(context,entity) {
-    with(context) {
-        beginPath();                
-        lineWidth = 3;
-        var x = entity["x"];
-        var y = entity["y"];
-        //moveTo(x,y);
-        fillStyle = entity["colour"];
-        strokeStyle = fillStyle;
-        arc(x, y, (entity["radius"])?entity["radius"]:50, 0, 2.0 * Math.PI, false);  
-        stroke();                                
-    }
+    const x = entity["x"];
+    const y = entity["y"];
+    const colour = entity["colour"];
+    const radius = entity["radius"] ? entity["radius"] : 50;
+
+    context.beginPath();
+    context.lineWidth = 3;
+    context.strokeStyle = context.fillStyle = colour;
+    context.arc(x, y, radius, 0, 2.0 * Math.PI, false);
+    context.stroke();
+    context.shadowBlur = 25;
+    context.shadowColor = "white";
 }
 
 function prepEntity(entity) {
@@ -70,28 +69,27 @@ function prepEntity(entity) {
 }
 
 function clearFrame() {
-    with(context) {
-	moveTo(0,0);
-	fillStyle = "#000";
-	fillRect(0,0,W,H);
-    }
-
+    context.moveTo(0,0);
+    context.fillStyle = "#33beff";
+    context.fillRect(0,0,W,H);
 }
+
 
 // This actually draws the frame
 function renderFrame() {
     clearFrame();
-    for (var key in world) {
-        var entity = world[key];
-        drawCircle(context,prepEntity(entity));
-    }
+
+    Object.values(world).forEach(
+        (entity) => drawCircle(context, prepEntity(entity))
+    );
 }
 
-var drawNext = true;
+let drawNext = true;
 // Signals that there's something to be drawn
 function drawNextFrame() {
     drawNext = true;
 }
+
 
 // This optionally draws the frame, call this if you're not sure if you should update
 // the canvas
@@ -106,29 +104,35 @@ function drawFrame() {
 // So use this code, it works well on multitouch devices as well.
 
 function getPosition(e) {
-	if ( e.targetTouches && e.targetTouches.length > 0) {
-		var touch = e.targetTouches[0];
-		var x = touch.pageX  - canvas.offsetLeft;
-		var y = touch.pageY  - canvas.offsetTop;
-		return [x,y];
-	} else {
-		var rect = e.target.getBoundingClientRect();
-		var x = e.offsetX || e.pageX - rect.left - window.scrollX;
-		var y = e.offsetY || e.pageY - rect.top  - window.scrollY;
-		var x = e.pageX  - canvas.offsetLeft;
-		var y = e.pageY  - canvas.offsetTop;
-		return [x,y];
-	}
+    let y;
+    let x;
+    if ( e.targetTouches && e.targetTouches.length > 0) {
+        const touch = e.targetTouches[0];
+        x = touch.pageX  - canvas.offsetLeft;
+        y = touch.pageY  - canvas.offsetTop;
+        return [x,y];
+    } else {
+        const rect = e.target.getBoundingClientRect();
+        x = e.offsetX || e.pageX - rect.left - window.scrollX;
+        y = e.offsetY || e.pageY - rect.top - window.scrollY;
+        x = e.pageX  - canvas.offsetLeft;
+        y = e.pageY  - canvas.offsetTop;
+        return [x,y];
+    }
 }
 
+//TODO
 function addEntity(entity, data) {
-    world[entity] = data;
-    drawNextFrame(); // (but should we?)
-    //XXX: Send a XHTML Request that updates the entity you just modified!
+    data = prepEntity(data);
+    socket.send(JSON.stringify({
+        [entity]: data
+    }))
+
 }
-var counter = 0;
+
+let counter = 0;
 function addEntityWithoutName(data) {
-    var name = "X"+(counter++)%100;
+    const name = "X"+(counter++)%100;
     addEntity(name,data);
 }
 
@@ -230,37 +234,55 @@ mouse = (function() {
 
 // Add the application specific mouse listeners!
 //XXX: TODO Make these prettier!
-mouse.mousedowners.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'blue'});
-});
+function entityFactory(params) {
+    return (x,y,clicked,e) => {
+        addEntityWithoutName({'x':x,'y':y, ...params});
+    }
+}
 
-mouse.mouseuppers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'red'});
-});
+mouse.mousedowners.push(entityFactory({colour:"#90ff33", radius: 15}));
 
-mouse.mousedraggers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'green',
-                          'radius':10});
-});
+mouse.mouseuppers.push(entityFactory({colour:"#6433ff", radius: 15}));
+
+mouse.mousedraggers.push(entityFactory({colour:"#DAF7A6", radius: 5}));
 
 
 function update() {
-    drawFrame();
+    //XXX: TODO Get the world from the webservice using a XMLHTTPRequest
+    // const url = `http://${host}/world`;
+    // const xhr = new XMLHttpRequest();
+    // xhr.open("GET", url);
+    // xhr.send();
+    // xhr.onreadystatechange = function () {
+    //     if (xhr.readyState===4) {
+    //         try {
+    //             if (xhr.status===200) {
+    //                 world = JSON.parse(this.responseText);
+    //             }
+    //         }
+    //         catch(e) {
+    //             alert('Error: ' + e.name);
+    //         }
+    //     }
+    // };
+    renderFrame();
 }
 
-
 function wsSetup() {
-    var url = "ws://"+host+"/subscribe";   
+    const url = "ws://"+host+"/subscribe";
     socket = new WebSocket(url);
     socket.onopen = function() {
-        //XXX: TODO What are you going to do here?
+        //get world
     };
     socket.onerror = function(msg) {
         debug("WebSocket Error:" + msg.data);
     };
     socket.onmessage = function(msg) {  
         try {
-            debug("WebSocket Recv:" + msg.data);
+            console.log(msg);
+            //debug("WebSocket Recv:" + msg.data);
+            world = JSON.parse(msg.data)
+
             //XXX: TODO What are you going to do here?            
         } catch (e) {
             alert("socket on message: " + e);

@@ -14,8 +14,10 @@
 # limitations under the License.
 #
 import flask
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_sockets import Sockets
+from gevent.pywsgi import WSGIServer
+from geventwebsocket.handler import WebSocketHandler
 import gevent
 from gevent import queue
 import time
@@ -25,6 +27,7 @@ import os
 app = Flask(__name__)
 sockets = Sockets(app)
 app.debug = True
+clients = list()
 
 class World:
     def __init__(self):
@@ -35,11 +38,18 @@ class World:
     def add_set_listener(self, listener):
         self.listeners.append( listener )
 
+    def send_all(self):
+        for client in clients:
+            world = self.world()
+            client.send(json.dumps(world))
+
+
     def update(self, entity, key, value):
         entry = self.space.get(entity,dict())
         entry[key] = value
         self.space[entity] = entry
-        self.update_listeners( entity )
+        #self.send_all()
+        #self.update_listeners( entity )
 
     def set(self, entity, data):
         self.space[entity] = data
@@ -59,29 +69,46 @@ class World:
     def world(self):
         return self.space
 
-myWorld = World()        
+myWorld = World()
 
 def set_listener( entity, data ):
+    for client in clients:
+        msg = {entity: data}
+        print(msg)
+        client.put( jsonify(msg) )
     ''' do something with the update ! '''
 
-myWorld.add_set_listener( set_listener )
+#myWorld.add_set_listener( set_listener )
         
 @app.route('/')
 def hello():
     '''Return something coherent here.. perhaps redirect to /static/index.html '''
-    return None
+    return app.send_static_file('index.html')
 
-def read_ws(ws,client):
+def read_ws(ws):
     '''A greenlet function that reads from the websocket and updates the world'''
     # XXX: TODO IMPLEMENT ME
-    return None
+    while not ws.closed:
+        msg = ws.receive()
+        #print("WS RECV: %s" % msg)
+        if (msg is not None):
+            content = json.loads(msg)
+            for entity, data in content.items():
+                print(entity, data)
+                for k, v in data.items():
+                    myWorld.update(entity, k, v)
+            # response = jsonify(myWorld.world()[entity])
+            myWorld.send_all()
+
 
 @sockets.route('/subscribe')
 def subscribe_socket(ws):
     '''Fufill the websocket URL of /subscribe, every update notify the
        websocket and read updates from the websocket '''
     # XXX: TODO IMPLEMENT ME
-    return None
+    clients.append(ws)
+    read_ws(ws)
+    clients.remove(ws)
 
 
 # I give this to you, this is how you get the raw body/data portion of a post in flask
@@ -99,23 +126,36 @@ def flask_post_json():
 @app.route("/entity/<entity>", methods=['POST','PUT'])
 def update(entity):
     '''update the entities via this interface'''
-    return None
+    content = flask_post_json()
+    for k, v in content.items():
+        print(k,v)
+        myWorld.update(entity, k, v)
+    response = jsonify(myWorld.world()[entity])
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 @app.route("/world", methods=['POST','GET'])    
 def world():
     '''you should probably return the world here'''
-    return None
+    response = jsonify(myWorld.world())
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 @app.route("/entity/<entity>")    
 def get_entity(entity):
     '''This is the GET version of the entity interface, return a representation of the entity'''
-    return None
+    response = jsonify(myWorld.get(entity))
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 
 @app.route("/clear", methods=['POST','GET'])
 def clear():
     '''Clear the world out!'''
-    return None
+    myWorld.clear()
+    response = jsonify(myWorld.world())
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 
 
@@ -125,4 +165,5 @@ if __name__ == "__main__":
         and run
         gunicorn -k flask_sockets.worker sockets:app
     '''
-    app.run()
+    http_server = WSGIServer(('',5000), app, handler_class=WebSocketHandler)
+    http_server.serve_forever()
